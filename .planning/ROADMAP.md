@@ -12,9 +12,9 @@
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 1: 数据管道与权限** - 数据库建表、Excel 导入解析、API 端点和管理员权限控制
-- [ ] **Phase 2: Dashboard 概览** - 宏观统计卡片、筛选分类汇总、持仓快照、历史对比
-- [ ] **Phase 3: 筛选与详情** - 代码列表多维度筛选排序、标的详情时序查看
+- [x] **Phase 1: 数据管道与权限** - 数据库建表、Excel 导入解析、API 端点和管理员权限控制
+- [x] **Phase 2: Dashboard 概览** - 宏观统计卡片、筛选分类汇总、持仓快照、历史对比
+- [x] **Phase 3: 筛选与详情** - 代码列表多维度筛选排序、标的详情时序查看
 
 ## Phase Details
 
@@ -31,9 +31,9 @@ Decimal phases appear between their surrounding integers in numeric order.
 **Plans**: TBD
 
 Plans:
-- [ ] 01-01: 数据库建表与后端服务（market_overview_data、market_overview_uploads 表，Service 层）
-- [ ] 01-02: Excel 解析与导入 API（openpyxl 解析、文件名识别、数据入库、导入摘要）
-- [ ] 01-03: 前端集成与权限控制（导航 tab、上传组件、admin 权限守卫）
+- [x] 01-01: 数据库建表与后端服务（market_overview_data、market_overview_uploads 表，Service 层）
+- [x] 02-02: Excel 解析与导入 API（openpyxl 解析、文件名识别、数据入库、导入摘要）
+- [x] 01-03: 前端集成与权限控制（导航 tab、上传组件、admin 权限守卫）
 
 ### Phase 2: Dashboard 概览
 **Goal**: 管理员在 Dashboard 页一览全市场多维度状态，快速发现变化和异常
@@ -67,10 +67,10 @@ Plans:
 **UI hint**: yes
 
 Plans:
-- [ ] 03-01: 筛选列表后端 API（多条件查询、排序、分页）
-- [ ] 03-02: 筛选列表前端视图（搜索、筛选控件、排序表格、分页）
-- [ ] 03-03: 标的详情后端 API（时序数据查询、日期范围筛选）
-- [ ] 03-04: 标的详情前端视图（基础信息、时序图表、日期范围选择器）
+- [x] 03-01: 筛选列表后端 API（多条件查询、排序、分页）
+- [x] 03-02: 筛选列表前端视图（搜索、筛选控件、排序表格、分页）
+- [x] 03-03: 标的详情后端 API（时序数据查询、日期范围筛选）
+- [x] 03-04: 标的详情前端视图（基础信息、时序图表、日期范围选择器）
 
 ## Progress
 
@@ -79,6 +79,6 @@ Phases execute in numeric order: 1 -> 2 -> 3
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. 数据管道与权限 | 0/3 | Not started | - |
-| 2. Dashboard 概览 | 0/2 | Not started | - |
-| 3. 筛选与详情 | 0/4 | Not started | - |
+| 1. 数据管道与权限 | 3/3 | Done | 2026-05-19 |
+| 2. Dashboard 概览 | 2/2 | Done | 2026-05-19 |
+| 3. 筛选与详情 | 3/3 | Done | 2026-05-19 |
