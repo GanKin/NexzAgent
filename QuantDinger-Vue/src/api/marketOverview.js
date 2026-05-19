@@ -4,7 +4,9 @@ const api = {
   upload: '/api/market-overview/upload',
   uploads: '/api/market-overview/uploads',
   dates: '/api/market-overview/dates',
-  dashboard: '/api/market-overview/dashboard'
+  dashboard: '/api/market-overview/dashboard',
+  symbols: '/api/market-overview/symbols',
+  symbolTimeline: '/api/market-overview/symbols/'
 }
 
 export default api
@@ -58,5 +60,28 @@ export function getDashboardData (date) {
     url: api.dashboard,
     method: 'get',
     params: date ? { date } : {}
+  })
+}
+
+
+/**
+ * 获取代码列表（筛选+排序+分页）
+ */
+export function getSymbolList (params) {
+  return request({
+    url: api.symbols,
+    method: 'get',
+    params
+  })
+}
+
+/**
+ * 获取标的时序数据
+ */
+export function getSymbolTimeline (symbol, params) {
+  return request({
+    url: api.symbolTimeline + symbol + '/timeline',
+    method: 'get',
+    params
   })
 }

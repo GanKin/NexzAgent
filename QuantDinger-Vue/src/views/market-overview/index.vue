@@ -51,12 +51,16 @@
           </a-col>
         </a-row>
       </a-tab-pane>
+      <a-tab-pane key="list" tab="代码列表">
+        <symbol-list />
+      </a-tab-pane>
     </a-tabs>
   </div>
 </template>
 
 <script>
 import DashboardTab from './DashboardTab'
+import SymbolList from './SymbolList'
 import UploadCard from './UploadCard'
 import { getUploadHistory } from '@/api/marketOverview'
 
@@ -64,6 +68,7 @@ export default {
   name: 'MarketOverview',
   components: {
     DashboardTab,
+    SymbolList,
     UploadCard
   },
   data () {
