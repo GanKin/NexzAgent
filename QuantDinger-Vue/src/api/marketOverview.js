@@ -3,7 +3,8 @@ import request from '@/utils/request'
 const api = {
   upload: '/api/market-overview/upload',
   uploads: '/api/market-overview/uploads',
-  dates: '/api/market-overview/dates'
+  dates: '/api/market-overview/dates',
+  dashboard: '/api/market-overview/dashboard'
 }
 
 export default api
@@ -44,5 +45,18 @@ export function getAvailableDates (parameter) {
     url: api.dates,
     method: 'get',
     params: parameter
+  })
+}
+
+
+/**
+ * 获取 Dashboard 数据
+ * @param {string} date - 可选，默认最新日期
+ */
+export function getDashboardData (date) {
+  return request({
+    url: api.dashboard,
+    method: 'get',
+    params: date ? { date } : {}
   })
 }
