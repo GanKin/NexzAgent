@@ -203,3 +203,30 @@ def get_dates():
             'dates': dates,
         },
     }), 200
+
+
+@market_overview_bp.route('/dashboard', methods=['GET'])
+@login_required
+@admin_required
+def get_dashboard():
+    """获取 Dashboard 全量数据"""
+    date = request.args.get('date', None)
+
+    if not date:
+        # 默认取最新日期
+        dates = _service.get_available_dates()
+        if not dates:
+            return jsonify({'code': 1, 'msg': 'success', 'data': None}), 200
+        date = dates[0]
+
+    try:
+        data = _service.get_dashboard_data(date)
+    except Exception as e:
+        logger.error(f"Dashboard 数据查询失败: {e}", exc_info=True)
+        return jsonify({'code': 0, 'msg': f'查询失败: {str(e)}', 'data': None}), 500
+
+    return jsonify({
+        'code': 1,
+        'msg': 'success',
+        'data': data,
+    }), 200

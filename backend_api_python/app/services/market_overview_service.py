@@ -347,3 +347,234 @@ class MarketOverviewService:
                 break
 
         return date_str, data_type
+
+    # ================================================================
+    # Dashboard 数据聚合
+    # ================================================================
+
+    # 持仓名单
+    HOLDINGS = frozenset({
+        "PYPL", "MSFT", "ALB", "IXC", "AEIS", "AMPX", "MU",
+        "SNDK", "PLTR", "META", "TSM", "GOOG", "UNH", "BE", "TAN", "SOXS"
+    })
+
+    def get_dashboard_data(self, data_date: str) -> Dict:
+        """
+        获取 Dashboard 全量数据。
+
+        一次调用返回趋势分布、资金面、比价状态、四分类汇总、
+        持仓快照和变化对比。
+
+        Args:
+            data_date: 数据日期 (YYYY-MM-DD)
+
+        Returns:
+            {date, prev_date, stats, holdings, changes_summary}
+        """
+        try:
+            with get_db_connection() as conn:
+                cur = conn.cursor()
+
+                # 1. 查询当日全量统计数据（一条聚合查询）
+                cur.execute(
+                    """
+                    SELECT
+                        COUNT(*) as total,
+                        COUNT(*) FILTER (WHERE d_trend = '上行趋势') as d_up,
+                        COUNT(*) FILTER (WHERE d_trend = '无趋势') as d_flat,
+                        COUNT(*) FILTER (WHERE d_trend = '下行趋势') as d_down,
+                        COUNT(*) FILTER (WHERE w_trend = '上行趋势') as w_up,
+                        COUNT(*) FILTER (WHERE w_trend = '无趋势') as w_flat,
+                        COUNT(*) FILTER (WHERE w_trend = '下行趋势') as w_down,
+                        COUNT(*) FILTER (WHERE m_trend = '上行趋势') as m_up,
+                        COUNT(*) FILTER (WHERE m_trend = '无趋势') as m_flat,
+                        COUNT(*) FILTER (WHERE m_trend = '下行趋势') as m_down,
+                        COUNT(*) FILTER (WHERE leverage_status = '加杠杆') as lev_long,
+                        COUNT(*) FILTER (WHERE leverage_status = '去杠杆') as lev_short,
+                        COUNT(*) FILTER (WHERE relative_price_status = 'lead') as rp_lead,
+                        COUNT(*) FILTER (WHERE relative_price_status = 'Improving') as rp_improving,
+                        COUNT(*) FILTER (WHERE relative_price_status = 'Weakening') as rp_weakening,
+                        COUNT(*) FILTER (WHERE relative_price_status = 'Lag') as rp_lag
+                    FROM market_overview_data
+                    WHERE data_date = %s
+                    """,
+                    (data_date,),
+                )
+                columns = [desc[0] for desc in cur.description]
+                row = cur.fetchone()
+                agg = dict(zip(columns, row))
+
+                total = agg.get('total', 0) or 0
+
+                # 趋势分布
+                trends = {
+                    'daily': {'up': agg.get('d_up', 0) or 0, 'flat': agg.get('d_flat', 0) or 0, 'down': agg.get('d_down', 0) or 0},
+                    'weekly': {'up': agg.get('w_up', 0) or 0, 'flat': agg.get('w_flat', 0) or 0, 'down': agg.get('w_down', 0) or 0},
+                    'monthly': {'up': agg.get('m_up', 0) or 0, 'flat': agg.get('m_flat', 0) or 0, 'down': agg.get('m_down', 0) or 0},
+                    'total': total,
+                }
+
+                # 资金面
+                lev_long = agg.get('lev_long', 0) or 0
+                lev_short = agg.get('lev_short', 0) or 0
+                leverage = {
+                    'long': lev_long,
+                    'short': lev_short,
+                    'long_pct': round(lev_long / total * 100, 1) if total else 0,
+                    'short_pct': round(lev_short / total * 100, 1) if total else 0,
+                }
+
+                # 比价状态
+                relative_price = {
+                    'lead': agg.get('rp_lead', 0) or 0,
+                    'improving': agg.get('rp_improving', 0) or 0,
+                    'weakening': agg.get('rp_weakening', 0) or 0,
+                    'lag': agg.get('rp_lag', 0) or 0,
+                    'total': total,
+                }
+
+                # 2. 四分类汇总（查询全量行在 Python 中分类）
+                cur.execute(
+                    """
+                    SELECT symbol, d_trend, w_trend, m_trend,
+                           d_trend_duration, leverage_status,
+                           relative_price_status, early_reversal, relative_strength
+                    FROM market_overview_data
+                    WHERE data_date = %s
+                    """,
+                    (data_date,),
+                )
+                all_rows = cur.fetchall()
+
+                categories = {'main_trend': 0, 'main_pullback': 0, 'new_signal': 0, 'avoid': 0}
+                main_trend_set = set()
+                main_pullback_set = set()
+
+                for r in all_rows:
+                    sym, d, w, m, d_dur, lev, rp, early, rs = (r[0], r[1], r[2], r[3],
+                                                                r[4] or 0, r[5], r[6],
+                                                                float(r[7] or 0), float(r[8] or 0))
+
+                    is_main = (d == '上行趋势' and w == '上行趋势' and lev == '加杠杆')
+                    if is_main:
+                        categories['main_trend'] += 1
+                        main_trend_set.add(sym)
+                        continue
+
+                    is_pullback = ((d == '上行趋势' or w == '上行趋势') and
+                                   (rp in ('Lag', 'Improving') or lev == '去杠杆'))
+                    if is_pullback:
+                        categories['main_pullback'] += 1
+                        main_pullback_set.add(sym)
+                        continue
+
+                    is_new_signal = (
+                        (d == '上行趋势' and (d_dur or 0) <= 5) or
+                        (d == '上行趋势' and rp == 'Improving' and lev == '加杠杆') or
+                        (early > 110 and rs > 95 and lev == '加杠杆')
+                    )
+                    if is_new_signal:
+                        categories['new_signal'] += 1
+                        continue
+
+                    is_avoid = (d == '下行趋势' and w == '下行趋势' and lev == '去杠杆')
+                    if is_avoid:
+                        categories['avoid'] += 1
+
+                # 3. 查询持仓数据
+                holdings_list = list(self.HOLDINGS)
+                placeholders = ','.join(['%s'] * len(holdings_list))
+                cur.execute(
+                    f"""
+                    SELECT symbol, name,
+                           d_trend, d_trend_duration,
+                           w_trend, w_trend_duration,
+                           m_trend, m_trend_duration,
+                           relative_price_status,
+                           leverage_status, leverage_value, leverage_change,
+                           price_position_60d
+                    FROM market_overview_data
+                    WHERE data_date = %s AND symbol IN ({placeholders})
+                    ORDER BY symbol
+                    """,
+                    [data_date] + holdings_list,
+                )
+                h_columns = [desc[0] for desc in cur.description]
+                h_rows = cur.fetchall()
+                holdings = [dict(zip(h_columns, row)) for row in h_rows]
+
+                # 4. 变化对比（前一交易日）
+                prev_date = None
+                cur.execute(
+                    """
+                    SELECT MAX(data_date)::text
+                    FROM market_overview_data
+                    WHERE data_date < %s
+                    """,
+                    (data_date,),
+                )
+                prev_row = cur.fetchone()
+                if prev_row and prev_row[0]:
+                    prev_date = prev_row[0]
+
+                changes_summary = {'improved': 0, 'worsened': 0, 'new_symbols': 0}
+
+                if prev_date:
+                    # 查询前一天持仓数据
+                    cur.execute(
+                        f"""
+                        SELECT symbol, d_trend, w_trend, m_trend,
+                               leverage_status, relative_price_status
+                        FROM market_overview_data
+                        WHERE data_date = %s AND symbol IN ({placeholders})
+                        """,
+                        [prev_date] + holdings_list,
+                    )
+                    pc = [desc[0] for desc in cur.description]
+                    prev_rows = cur.fetchall()
+                    prev_map = {row[0]: dict(zip(pc, row)) for row in prev_rows}
+
+                    # 趋势排序：上行趋势(1) > 无趋势(0) > 下行趋势(-1)
+                    trend_order = {'上行趋势': 1, '无趋势': 0, '下行趋势': -1}
+
+                    for h in holdings:
+                        sym = h['symbol']
+                        if sym not in prev_map:
+                            h['change'] = 'new'
+                            changes_summary['new_symbols'] += 1
+                            continue
+
+                        prev = prev_map[sym]
+                        cur_trend = trend_order.get(h.get('d_trend', ''), 0)
+                        prev_trend = trend_order.get(prev.get('d_trend', ''), 0)
+
+                        if cur_trend > prev_trend:
+                            h['change'] = 'improved'
+                            changes_summary['improved'] += 1
+                        elif cur_trend < prev_trend:
+                            h['change'] = 'worsened'
+                            changes_summary['worsened'] += 1
+                        else:
+                            h['change'] = 'stable'
+                else:
+                    for h in holdings:
+                        h['change'] = None
+
+                conn.commit()
+
+                return {
+                    'date': data_date,
+                    'prev_date': prev_date,
+                    'stats': {
+                        'trends': trends,
+                        'leverage': leverage,
+                        'relative_price': relative_price,
+                        'categories': categories,
+                    },
+                    'holdings': holdings,
+                    'changes_summary': changes_summary,
+                }
+
+        except Exception as e:
+            logger.error(f"Dashboard 数据查询失败: {e}", exc_info=True)
+            raise
