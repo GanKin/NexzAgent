@@ -578,3 +578,212 @@ class MarketOverviewService:
         except Exception as e:
             logger.error(f"Dashboard 数据查询失败: {e}", exc_info=True)
             raise
+
+    # ================================================================
+    # 筛选列表与时序查询
+    # ================================================================
+
+    # 排序字段白名单（防 SQL 注入）
+    SORT_COLUMNS = {
+        'relative_strength': 'relative_strength',
+        'early_reversal': 'early_reversal',
+        'leverage_value': 'leverage_value',
+        'trend_duration': 'd_trend_duration',
+    }
+
+    # 趋势级别到列名的映射
+    TREND_LEVEL_COLUMNS = {
+        'daily': 'd_trend',
+        'weekly': 'w_trend',
+        'monthly': 'm_trend',
+    }
+
+    def get_symbols(
+        self,
+        data_date: str = None,
+        search: str = None,
+        trend_level: str = 'daily',
+        trend: str = None,
+        relative_price: str = None,
+        leverage: str = None,
+        sort: str = 'relative_strength',
+        sort_order: str = 'desc',
+        page: int = 1,
+        page_size: int = 50,
+    ) -> Dict:
+        """
+        代码列表查询（多维筛选+排序+分页）。
+
+        Args:
+            data_date: 数据日期，None 则取最新
+            search: 搜索代码或名称
+            trend_level: daily/weekly/monthly
+            trend: 趋势状态筛选
+            relative_price: 比价状态筛选
+            leverage: 杠杆状态筛选
+            sort: 排序字段
+            sort_order: asc/desc
+            page: 页码（从1开始）
+            page_size: 每页条数
+
+        Returns:
+            {items, total, page, page_size, data_date}
+        """
+        try:
+            # 默认取最新日期
+            if not data_date:
+                dates = self.get_available_dates()
+                if not dates:
+                    return {'items': [], 'total': 0, 'page': page, 'page_size': page_size, 'data_date': None}
+                data_date = dates[0]
+
+            with get_db_connection() as conn:
+                cur = conn.cursor()
+
+                # 构建动态 WHERE 条件
+                conditions = ['data_date = %s']
+                params = [data_date]
+
+                if search:
+                    conditions.append('(symbol ILIKE %s OR name ILIKE %s)')
+                    search_pattern = f'%{search}%'
+                    params.extend([search_pattern, search_pattern])
+
+                if trend and trend_level in self.TREND_LEVEL_COLUMNS:
+                    col = self.TREND_LEVEL_COLUMNS[trend_level]
+                    conditions.append(f'{col} = %s')
+                    params.append(trend)
+
+                if relative_price:
+                    conditions.append('relative_price_status = %s')
+                    params.append(relative_price)
+
+                if leverage:
+                    conditions.append('leverage_status = %s')
+                    params.append(leverage)
+
+                where_clause = ' AND '.join(conditions)
+
+                # COUNT 查询
+                cur.execute(
+                    f'SELECT COUNT(*) FROM market_overview_data WHERE {where_clause}',
+                    params[:]
+                )
+                total = cur.fetchone()[0]
+
+                # 排序
+                sort_col = self.SORT_COLUMNS.get(sort, 'relative_strength')
+                order_dir = 'ASC' if sort_order.lower() == 'asc' else 'DESC'
+
+                # 数据查询
+                offset = (page - 1) * page_size
+                cur.execute(
+                    f"""
+                    SELECT id, symbol, name, data_date,
+                           relative_strength, strength_momentum, early_reversal,
+                           d_trend, d_trend_duration,
+                           w_trend, w_trend_duration,
+                           m_trend, m_trend_duration,
+                           relative_price_status, relative_price_duration,
+                           leverage_status, leverage_value, leverage_change,
+                           price_position_60d
+                    FROM market_overview_data
+                    WHERE {where_clause}
+                    ORDER BY {sort_col} {order_dir} NULLS LAST
+                    LIMIT %s OFFSET %s
+                    """,
+                    params + [page_size, offset],
+                )
+                columns = [desc[0] for desc in cur.description]
+                rows = cur.fetchall()
+                items = []
+                for row in rows:
+                    record = dict(zip(columns, row))
+                    record['is_holding'] = record['symbol'] in self.HOLDINGS
+                    items.append(record)
+
+                conn.commit()
+
+                return {
+                    'items': items,
+                    'total': total,
+                    'page': page,
+                    'page_size': page_size,
+                    'data_date': data_date,
+                }
+
+        except Exception as e:
+            logger.error(f"列表查询失败: {e}", exc_info=True)
+            raise
+
+    def get_symbol_timeline(self, symbol: str, start_date: str = None, end_date: str = None) -> Optional[Dict]:
+        """
+        获取单标的时序数据。
+
+        Args:
+            symbol: 标的代码
+            start_date: 起始日期（可选）
+            end_date: 结束日期（可选）
+
+        Returns:
+            {symbol, name, timeline, date_range} 或 None（标的不存在）
+        """
+        try:
+            with get_db_connection() as conn:
+                cur = conn.cursor()
+
+                # 获取标的名称
+                cur.execute(
+                    'SELECT DISTINCT name FROM market_overview_data WHERE symbol = %s LIMIT 1',
+                    (symbol,)
+                )
+                name_row = cur.fetchone()
+                if not name_row:
+                    return None
+                name = name_row[0]
+
+                # 构建查询条件
+                conditions = ['symbol = %s']
+                params = [symbol]
+
+                if start_date:
+                    conditions.append('data_date >= %s')
+                    params.append(start_date)
+                if end_date:
+                    conditions.append('data_date <= %s')
+                    params.append(end_date)
+
+                where = ' AND '.join(conditions)
+
+                cur.execute(
+                    f"""
+                    SELECT data_date::text, d_trend, d_trend_duration,
+                           w_trend, w_trend_duration, m_trend, m_trend_duration,
+                           relative_price_status, relative_price_duration,
+                           leverage_status, leverage_value, leverage_change,
+                           relative_strength, price_position_60d
+                    FROM market_overview_data
+                    WHERE {where}
+                    ORDER BY data_date DESC
+                    """,
+                    params,
+                )
+                columns = [desc[0] for desc in cur.description]
+                rows = cur.fetchall()
+                timeline = [dict(zip(columns, row)) for row in rows]
+
+                conn.commit()
+
+                return {
+                    'symbol': symbol,
+                    'name': name,
+                    'timeline': timeline,
+                    'date_range': {
+                        'start': timeline[-1]['data_date'] if timeline else None,
+                        'end': timeline[0]['data_date'] if timeline else None,
+                    }
+                }
+
+        except Exception as e:
+            logger.error(f"时序查询失败 ({symbol}): {e}", exc_info=True)
+            raise

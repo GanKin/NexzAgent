@@ -230,3 +230,59 @@ def get_dashboard():
         'msg': 'success',
         'data': data,
     }), 200
+
+
+@market_overview_bp.route('/symbols', methods=['GET'])
+@login_required
+@admin_required
+def get_symbols():
+    """代码列表查询（筛选+排序+分页）"""
+    data_date = request.args.get('date', None)
+    search = request.args.get('search', None)
+    trend_level = request.args.get('trend_level', 'daily')
+    trend = request.args.get('trend', None)
+    relative_price = request.args.get('relative_price', None)
+    leverage = request.args.get('leverage', None)
+    sort = request.args.get('sort', 'relative_strength')
+    page = request.args.get('page', 1, type=int)
+    page_size = request.args.get('page_size', 50, type=int)
+
+    page = max(1, page)
+    page_size = max(1, min(200, page_size))
+
+    try:
+        result = _service.get_symbols(
+            data_date=data_date, search=search,
+            trend_level=trend_level, trend=trend,
+            relative_price=relative_price, leverage=leverage,
+            sort=sort, page=page, page_size=page_size,
+        )
+    except Exception as e:
+        logger.error(f"列表查询失败: {e}", exc_info=True)
+        return jsonify({'code': 0, 'msg': f'查询失败: {str(e)}', 'data': None}), 500
+
+    return jsonify({'code': 1, 'msg': 'success', 'data': result}), 200
+
+
+@market_overview_bp.route('/symbols/<symbol>/timeline', methods=['GET'])
+@login_required
+@admin_required
+def get_symbol_timeline(symbol):
+    """标的时序数据"""
+    start_date = request.args.get('start_date', None)
+    end_date = request.args.get('end_date', None)
+
+    try:
+        result = _service.get_symbol_timeline(
+            symbol=symbol,
+            start_date=start_date,
+            end_date=end_date,
+        )
+    except Exception as e:
+        logger.error(f"时序查询失败 ({symbol}): {e}", exc_info=True)
+        return jsonify({'code': 0, 'msg': f'查询失败: {str(e)}', 'data': None}), 500
+
+    if result is None:
+        return jsonify({'code': 0, 'msg': '标的不存在', 'data': None}), 404
+
+    return jsonify({'code': 1, 'msg': 'success', 'data': result}), 200
